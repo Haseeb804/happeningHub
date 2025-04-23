@@ -91,6 +91,8 @@ const typeDefs = gql`
     countryCode: String
   }
 
+
+
   type Venue {
     name: String!
     url: String
@@ -149,18 +151,18 @@ const typeDefs = gql`
 
   type EventFeedback {
     id: ID!
-    eventId: ID!
-    attendeeEmail: String!
-    attendeeName: String!
-    rating: Int!
-    overallFeedback: String
-    wouldAttendAgain: Boolean
-    speakerRating: Int
-    speakerFeedback: String
-    venueRating: Int
-    venueFeedback: String
-    createdAt: String!
-    updatedAt: String!
+  eventId: ID!
+  attendeeEmail: String!
+  attendeeName: String!
+  rating: Int!
+  overallFeedback: String
+  wouldAttendAgain: Boolean
+  speakerRating: Int
+  speakerFeedback: String
+  venueRating: Int
+  venueFeedback: String
+  createdAt: String!
+  updatedAt: String!
   }
 
   type VenueFeedback {
@@ -208,7 +210,7 @@ const typeDefs = gql`
     attendeeUpcomingEvents(email: String!): [Event]
     event(id: ID!): Event
     getEventSpeaker(eventId: ID!): Speaker
-    getEventFeedbackForOrganizer(eventId: ID!): [EventFeedback]
+     getEventFeedbackForOrganizer(eventId: ID!): [EventFeedback]
   }
 
   type Mutation {
@@ -336,9 +338,11 @@ const resolvers = {
       }
     },
 
+    // In your resolvers.Query object
     getEventFeedbackForOrganizer: async (_, { eventId }, context) => {
       const session = driver.session();
       try {
+        // Get email from authenticated user
         if (!context.req.headers.email) {
           throw new Error("Authentication required");
         }
@@ -351,46 +355,47 @@ const resolvers = {
             email
           }
         );
-        if (!organizerCheck.records[0].get('isOrganizer')) {
-          throw new Error("Only the event organizer can view this feedback");
-        }
+    if (!organizerCheck.records[0].get('isOrganizer')) {
+      throw new Error("Only the event organizer can view this feedback");
+    }
 
-        const result = await session.run(
-          `MATCH (e:Event)<-[:FOR_EVENT]-(ef:EventFeedback)<-[:PROVIDED_FEEDBACK]-(a:Attendee)
-           OPTIONAL MATCH (ef)-[:HAS_SPEAKER_FEEDBACK]->(sf:SpeakerFeedback)
-           OPTIONAL MATCH (ef)-[:HAS_VENUE_FEEDBACK]->(vf:VenueFeedback)
-           RETURN ef, a.name as attendeeName, 
-                  sf.rating as speakerRating, sf.comment as speakerFeedback,
-                  vf.rating as venueRating, vf.comment as venueFeedback
-           ORDER BY ef.createdAt DESC`,
-          { eventId }
-        );
+    // Get all feedback for the event
+    const result = await session.run(
+      `MATCH (e:Event)<-[:FOR_EVENT]-(ef:EventFeedback)<-[:PROVIDED_FEEDBACK]-(a:Attendee)
+       OPTIONAL MATCH (ef)-[:HAS_SPEAKER_FEEDBACK]->(sf:SpeakerFeedback)
+       OPTIONAL MATCH (ef)-[:HAS_VENUE_FEEDBACK]->(vf:VenueFeedback)
+       RETURN ef, a.name as attendeeName, 
+              sf.rating as speakerRating, sf.comment as speakerFeedback,
+              vf.rating as venueRating, vf.comment as venueFeedback
+       ORDER BY ef.createdAt DESC`,
+      { eventId }
+    );
 
-        return result.records.map(record => {
-          const feedback = record.get('ef').properties;
-          return {
-            id: feedback.id,
-            eventId: feedback.eventId,
-            attendeeEmail: feedback.attendeeEmail,
-            attendeeName: record.get('attendeeName'),
-            rating: feedback.rating,
-            overallFeedback: feedback.comment,
-            wouldAttendAgain: feedback.wouldAttendAgain || false,
-            speakerRating: record.get('speakerRating'),
-            speakerFeedback: record.get('speakerFeedback'),
-            venueRating: record.get('venueRating'),
-            venueFeedback: record.get('venueFeedback'),
-            createdAt: feedback.createdAt,
-            updatedAt: feedback.updatedAt || feedback.createdAt
-          };
-        });
-      } catch (err) {
-        console.error('Error fetching event feedback:', err);
-        throw new Error(err.message || 'Failed to fetch event feedback');
-      } finally {
-        await session.close();
-      }
-    },
+    return result.records.map(record => {
+      const feedback = record.get('ef').properties;
+      return {
+        id: feedback.id,
+        eventId: feedback.eventId,
+        attendeeEmail: feedback.attendeeEmail,
+        attendeeName: record.get('attendeeName'),
+        rating: feedback.rating,
+        overallFeedback: feedback.comment,
+        wouldAttendAgain: feedback.wouldAttendAgain || false,
+        speakerRating: record.get('speakerRating'),
+        speakerFeedback: record.get('speakerFeedback'),
+        venueRating: record.get('venueRating'),
+        venueFeedback: record.get('venueFeedback'),
+        createdAt: feedback.createdAt,
+        updatedAt: feedback.updatedAt || feedback.createdAt
+      };
+    });
+  } catch (err) {
+    console.error('Error fetching event feedback:', err);
+    throw new Error(err.message || 'Failed to fetch event feedback');
+  } finally {
+    await session.close();
+  }
+},
 
     getEventSpeaker: async (_, { eventId }) => {
       const session = driver.session();
@@ -635,87 +640,55 @@ const resolvers = {
         await session.close();
       }
     },
-    // In your resolvers.js
-recommendedEvents: async (_, { email }) => {
-    const session = driver.session();
-    try {
-      // Get user's interests and skills
-      const userResult = await session.run(
-        `MATCH (u:Attendee {email: $email})
-         OPTIONAL MATCH (u)-[:HAS_INTEREST]->(i:Interest)
-         OPTIONAL MATCH (u)-[:HAS_SKILL]->(s:Skill)
-         RETURN collect(DISTINCT i.name) as interests, 
-                collect(DISTINCT s.name) as skills`,
-        { email }
-      );
-      
-      const interests = userResult.records[0].get('interests') || [];
-      const skills = userResult.records[0].get('skills') || [];
-      
-      if (interests.length === 0 && skills.length === 0) {
-        return [];
-      }
-  
-      // Find matching events
-      const eventResult = await session.run(
-        `MATCH (e:Event {status: 'ACTIVE'})-[:AT_VENUE]->(v:Venue)
-         WHERE (
-           EXISTS {
-             MATCH (e)-[:HAS_INTEREST]->(i:Interest)
-             WHERE i.name IN $interests
-           } OR
-           EXISTS {
-             MATCH (e)-[:RELATED_TO_SKILL]->(s:Skill)
-             WHERE s.name IN $skills
-           }
-         )
-         AND NOT EXISTS {
-           MATCH (u:Attendee {email: $email})-[:REGISTERED_FOR]->(e)
-         }
-         OPTIONAL MATCH (e)-[:HAS_SPEAKER]->(sp:Speaker)
-         RETURN e, v, collect(sp) as speakers
-         ORDER BY e.date ASC`,
-        { email, interests, skills }
-      );
-  
-      return eventResult.records.map(record => {
-        const event = record.get('e').properties;
-        const venue = record.get('v').properties;
-        const speakers = record.get('speakers').map(s => s.properties);
+    recommendedEvents: async (_, { email }) => {
+      const session = driver.session();
+      try {
+        const result = await session.run(
+          `MATCH (u:Attendee {email: $email})-[:HAS_INTEREST]->(i:Interest)
+           MATCH (e:Event {status: 'ACTIVE'})-[:HAS_INTEREST|RELATED_TO_INTEREST]->(i)
+           WHERE NOT (u)-[:CREATED]->(e)
+           MATCH (e)-[:AT_VENUE]->(v:Venue)
+           OPTIONAL MATCH (e)-[:HAS_SPEAKER]->(s:Speaker)
+           RETURN DISTINCT e, v, collect(s) as speakers
+           ORDER BY e.createdAt DESC`,
+          { email }
+        );
         
-        return {
-          id: event.id,
-          title: event.title,
-          description: event.description,
-          date: event.date,
-          time: event.time,
-          category: event.category,
-          interest: event.interest,
-          creatorEmail: event.creatorEmail,
-          creatorName: event.creatorName,
-          createdAt: event.createdAt,
-          status: event.status,
-          venue: {
-            name: venue.name,
-            url: venue.url || null,
-            address: venue.address || null
-          },
-          speakers: speakers.map(s => ({
-            email: s.email,
-            name: s.name,
-            status: s.status || 'PENDING', // Ensure status is never null
-            expertise: s.expertise || null,
-            affiliation: s.affiliation || null
-          }))
-        };
-      });
-    } catch (err) {
-      console.error('Error fetching recommended events:', err);
-      throw new Error('Failed to fetch recommended events');
-    } finally {
-      await session.close();
-    }
-  },
+        return result.records.map(record => {
+          const event = record.get('e').properties;
+          const venue = record.get('v').properties;
+          const speakers = record.get('speakers').map(s => s.properties);
+          return {
+            id: event.id,
+            title: event.title,
+            description: event.description,
+            date: event.date,
+            time: event.time,
+            category: event.category,
+            interest: event.interest,
+            creatorEmail: event.creatorEmail,
+            creatorName: event.creatorName,
+            createdAt: event.createdAt,
+            status: event.status,
+            venue: {
+              name: venue.name,
+              url: venue.url,
+              address: venue.address
+            },
+            speakers: speakers.map(s => ({
+              email: s.email,
+              name: s.name,
+              status: s.status
+            }))
+          };
+        });
+      } catch (err) {
+        console.error('Error fetching recommended events:', err);
+        throw new Error('Failed to fetch recommended events');
+      } finally {
+        await session.close();
+      }
+    },
     pendingEvents: async () => {
       const session = driver.session();
       try {
@@ -899,6 +872,7 @@ recommendedEvents: async (_, { email }) => {
             name: attendee.name,
             email: attendee.email,
             role: 'Attendee'
+            
           };
         });
       } catch (err) {
@@ -908,6 +882,54 @@ recommendedEvents: async (_, { email }) => {
         await session.close();
       }
     },
+
+    // In your resolvers.Query object
+userEvents: async (_, { email }) => {
+  const session = driver.session();
+  try {
+    const result = await session.run(
+      `MATCH (u:Organizer {email: $email})-[:CREATED]->(e:Event)-[:AT_VENUE]->(v:Venue)
+       OPTIONAL MATCH (e)-[:HAS_SPEAKER]->(s:Speaker)
+       RETURN e, v, collect(s) as speakers
+       ORDER BY e.date DESC`,
+      { email }
+    );
+    
+    return result.records.map(record => {
+      const event = record.get('e').properties;
+      const venue = record.get('v').properties;
+      const speakers = record.get('speakers').map(s => s.properties);
+      return {
+        id: event.id,
+        title: event.title,
+        description: event.description,
+        date: event.date,
+        time: event.time,
+        category: event.category,
+        interest: event.interest,
+        creatorEmail: event.creatorEmail,
+        creatorName: event.creatorName,
+        createdAt: event.createdAt,
+        status: event.status,
+        venue: {
+          name: venue.name,
+          url: venue.url,
+          address: venue.address
+        },
+        speakers: speakers.map(s => ({
+          email: s.email,
+          name: s.name,
+        }))
+      };
+    });
+  } catch (err) {
+    console.error('Error fetching user events:', err);
+    throw new Error('Failed to fetch user events');
+  } finally {
+    await session.close();
+  }
+},
+
     eventFeedback: async (_, { eventId }) => {
       const session = driver.session();
       try {
@@ -1187,6 +1209,8 @@ recommendedEvents: async (_, { email }) => {
     }
   },
   Mutation: {
+
+
     initiatePasswordReset: async (_, { email }) => {
       return await initiatePasswordReset(email);
     },
@@ -1204,6 +1228,7 @@ recommendedEvents: async (_, { email }) => {
       const session = driver.session();
     
       try {
+        // Validation checks
         if (
           !name?.trim() ||
           !email?.trim() ||
@@ -1219,6 +1244,7 @@ recommendedEvents: async (_, { email }) => {
           throw new Error("All required fields must be filled correctly.");
         }
     
+        // Check for existing email
         const existingUser = await session.run(
           `MATCH (u:Attendee|Organizer|Speaker {email: $email}) RETURN u`,
           { email }
@@ -1227,6 +1253,7 @@ recommendedEvents: async (_, { email }) => {
           throw new Error("User with this email already exists.");
         }
     
+        // Check for existing contact number - fixed query
         const existingContact = await session.run(
           `MATCH (u:Attendee|Organizer|Speaker) 
            WHERE u.contactNo IS NOT NULL AND u.contactNo = $contactNo 
@@ -1238,6 +1265,7 @@ recommendedEvents: async (_, { email }) => {
           throw new Error("User with this contact number already exists.");
         }
     
+        // Country code validation
         if (countryCode) {
           try {
             await axios.get(`https://restcountries.com/v3.1/alpha/${countryCode}`);
@@ -1246,8 +1274,10 @@ recommendedEvents: async (_, { email }) => {
           }
         }
     
+        // Hash password
         const hashedPassword = await bcrypt.hash(password, 10);
     
+        // Create user node
         const userNodeQuery = `
           CREATE (u:${role} {
             name: $name,
@@ -1277,6 +1307,7 @@ recommendedEvents: async (_, { email }) => {
           countryCode: countryCode || ""
         });
     
+        // Add skills
         for (const skill of skills) {
           await session.run(
             `MERGE (s:Skill {name: $skill})
@@ -1287,6 +1318,7 @@ recommendedEvents: async (_, { email }) => {
           );
         }
     
+        // Add interests
         for (const interest of interests) {
           await session.run(
             `MERGE (i:Interest {name: $interest})
@@ -1297,6 +1329,7 @@ recommendedEvents: async (_, { email }) => {
           );
         }
     
+        // Add expertise if speaker
         if (expertise && role === 'Speaker') {
           await session.run(
             `MERGE (e:Expertise {name: $expertise})
@@ -1307,6 +1340,7 @@ recommendedEvents: async (_, { email }) => {
           );
         }
     
+        // Add country if provided
         if (countryCode) {
           const countryResponse = await axios.get(`https://restcountries.com/v3.1/alpha/${countryCode}`);
           const country = countryResponse.data[0];
@@ -1475,6 +1509,7 @@ recommendedEvents: async (_, { email }) => {
         const eventId = crypto.randomBytes(16).toString('hex');
         const createdAt = new Date().toISOString();
 
+        // Create event with PENDING status
         const result = await session.run(
           `CREATE (e:Event {
             id: $id,
@@ -1527,6 +1562,7 @@ recommendedEvents: async (_, { email }) => {
         const event = result.records[0].get("e").properties;
         const venue = result.records[0].get("v").properties;
 
+        // Add speaker invitations if provided
         if (speakerEmails && speakerEmails.length > 0) {
           for (const speakerEmail of speakerEmails) {
             const speakerResult = await session.run(
@@ -1538,6 +1574,7 @@ recommendedEvents: async (_, { email }) => {
             if (speakerResult.records.length > 0) {
               const speaker = speakerResult.records[0].get("s").properties;
               
+              // Create invitation relationship
               await session.run(
                 `MATCH (e:Event {id: $eventId})
                  MATCH (s:Speaker {email: $speakerEmail})
@@ -1552,6 +1589,7 @@ recommendedEvents: async (_, { email }) => {
                 }
               );
 
+              // Create notification
               const notificationId = crypto.randomBytes(16).toString('hex');
               await session.run(
                 `MATCH (s:Speaker {email: $speakerEmail})
@@ -1573,6 +1611,7 @@ recommendedEvents: async (_, { email }) => {
                 }
               );
 
+              // Send email
               await sendInvitationEmail(
                 speakerEmail, 
                 {
@@ -1624,6 +1663,7 @@ recommendedEvents: async (_, { email }) => {
           throw new Error("Invalid status. Must be either 'ACCEPTED' or 'REJECTED'");
         }
     
+        // First get the speaker email before updating
         const getResult = await session.run(
           `MATCH (e:Event)-[r:HAS_SPEAKER]->(s:Speaker)
            WHERE e.id = $invitationId
@@ -1640,6 +1680,7 @@ recommendedEvents: async (_, { email }) => {
         const relationship = getResult.records[0].get('r').properties;
     
         if (status === 'REJECTED') {
+          // Delete the relationship if rejected
           await session.run(
             `MATCH (e:Event)-[r:HAS_SPEAKER]->(s:Speaker)
              WHERE e.id = $invitationId
@@ -1647,6 +1688,7 @@ recommendedEvents: async (_, { email }) => {
             { invitationId }
           );
         } else {
+          // Update status if accepted
           await session.run(
             `MATCH (e:Event)-[r:HAS_SPEAKER]->(s:Speaker)
              WHERE e.id = $invitationId
@@ -1656,6 +1698,7 @@ recommendedEvents: async (_, { email }) => {
           );
         }
     
+        // Get venue details
         const venueResult = await session.run(
           `MATCH (e:Event {id: $eventId})-[:AT_VENUE]->(v:Venue)
            RETURN v`,
@@ -1663,6 +1706,7 @@ recommendedEvents: async (_, { email }) => {
         );
         const venue = venueResult.records[0]?.get('v')?.properties || {};
     
+        // Get other speakers
         const speakersResult = await session.run(
           `MATCH (e:Event {id: $eventId})-[:HAS_SPEAKER]->(s:Speaker)
            RETURN collect(s) as speakers`,
@@ -1765,6 +1809,7 @@ recommendedEvents: async (_, { email }) => {
     registerForEvent: async (_, { eventId, attendeeEmail }) => {
       const session = driver.session();
       try {
+        // Check if already registered
         const checkResult = await session.run(
           `MATCH (a:Attendee {email: $attendeeEmail})-[:REGISTERED_FOR]->(e:Event {id: $eventId})
            RETURN count(a) as count`,
@@ -1775,6 +1820,7 @@ recommendedEvents: async (_, { email }) => {
           throw new Error("You are already registered for this event");
         }
 
+        // Register the attendee
         await session.run(
           `MATCH (a:Attendee {email: $attendeeEmail})
            MATCH (e:Event {id: $eventId})
@@ -1782,6 +1828,7 @@ recommendedEvents: async (_, { email }) => {
           { attendeeEmail, eventId }
         );
 
+        // Get the updated event details
         const eventResult = await session.run(
           `MATCH (e:Event {id: $eventId})-[:AT_VENUE]->(v:Venue)
            OPTIONAL MATCH (e)-[:HAS_SPEAKER]->(s:Speaker)
@@ -1911,6 +1958,7 @@ recommendedEvents: async (_, { email }) => {
         await session.close();
       }
     },
+    
     submitSpeakerFeedback: async (_, { speakerEmail, eventId, attendeeEmail, rating, comment }) => {
       const session = driver.session();
       try {
@@ -1918,6 +1966,7 @@ recommendedEvents: async (_, { email }) => {
           throw new Error("Rating must be between 1 and 5");
         }
         
+        // Verify the speaker is actually associated with this event
         const verification = await session.run(
           `MATCH (e:Event {id: $eventId})-[:HAS_SPEAKER]->(s:Speaker {email: $speakerEmail})
            RETURN count(s) > 0 as isSpeaker`,
@@ -1978,12 +2027,14 @@ recommendedEvents: async (_, { email }) => {
     cancelEventRegistration: async (_, { eventId, attendeeEmail }) => {
       const session = driver.session();
       try {
+        // Remove registration relationship
         await session.run(
           `MATCH (a:Attendee {email: $attendeeEmail})-[r:REGISTERED_FOR]->(e:Event {id: $eventId})
            DELETE r`,
           { attendeeEmail, eventId }
         );
 
+        // Get the updated event details
         const eventResult = await session.run(
           `MATCH (e:Event {id: $eventId})-[:AT_VENUE]->(v:Venue)
            OPTIONAL MATCH (e)-[:HAS_SPEAKER]->(s:Speaker)
@@ -2028,6 +2079,7 @@ recommendedEvents: async (_, { email }) => {
     updateEvent: async (_, { eventId, title, description, date, time, category, interest, venueName, venueUrl, venueAddress }) => {
       const session = driver.session();
       try {
+        // Update event properties
         await session.run(
           `MATCH (e:Event {id: $eventId})
            SET e.title = COALESCE($title, e.title),
@@ -2047,6 +2099,7 @@ recommendedEvents: async (_, { email }) => {
           }
         );
 
+        // Update venue if provided
         if (venueName) {
           await session.run(
             `MATCH (e:Event {id: $eventId})-[:AT_VENUE]->(v:Venue)
@@ -2062,6 +2115,7 @@ recommendedEvents: async (_, { email }) => {
           );
         }
 
+        // Get the updated event details
         const eventResult = await session.run(
           `MATCH (e:Event {id: $eventId})-[:AT_VENUE]->(v:Venue)
            OPTIONAL MATCH (e)-[:HAS_SPEAKER]->(s:Speaker)
@@ -2106,6 +2160,7 @@ recommendedEvents: async (_, { email }) => {
     addSpeakerToEvent: async (_, { eventId, speakerEmail }) => {
       const session = driver.session();
       try {
+        // Check if speaker already added
         const checkResult = await session.run(
           `MATCH (e:Event {id: $eventId})-[:HAS_SPEAKER]->(s:Speaker {email: $speakerEmail})
            RETURN count(s) as count`,
@@ -2116,6 +2171,7 @@ recommendedEvents: async (_, { email }) => {
           throw new Error("Speaker is already added to this event");
         }
 
+        // Add speaker to event
         await session.run(
           `MATCH (e:Event {id: $eventId})
            MATCH (s:Speaker {email: $speakerEmail})
@@ -2123,6 +2179,7 @@ recommendedEvents: async (_, { email }) => {
           { eventId, speakerEmail }
         );
 
+        // Get the updated event details
         const eventResult = await session.run(
           `MATCH (e:Event {id: $eventId})-[:AT_VENUE]->(v:Venue)
            OPTIONAL MATCH (e)-[:HAS_SPEAKER]->(s:Speaker)
@@ -2167,12 +2224,14 @@ recommendedEvents: async (_, { email }) => {
     removeSpeakerFromEvent: async (_, { eventId, speakerEmail }) => {
       const session = driver.session();
       try {
+        // Remove speaker from event
         await session.run(
           `MATCH (e:Event {id: $eventId})-[r:HAS_SPEAKER]->(s:Speaker {email: $speakerEmail})
            DELETE r`,
           { eventId, speakerEmail }
         );
 
+        // Get the updated event details
         const eventResult = await session.run(
           `MATCH (e:Event {id: $eventId})-[:AT_VENUE]->(v:Venue)
            OPTIONAL MATCH (e)-[:HAS_SPEAKER]->(s:Speaker)
@@ -2230,6 +2289,7 @@ const server = new ApolloServer({
 });
 
 async function startServer() {
+  // Add this before starting the server
   app.post('/api/send-invitation', async (req, res) => {
     try {
       const { speakerEmail, eventDetails, invitationId } = req.body;
@@ -2256,6 +2316,7 @@ async function startServer() {
     }
   });
 
+  // Keep your existing invitation acceptance/rejection routes
   app.get('/api/invitations/accept/:id', async (req, res) => {
     try {
       const session = driver.session();
@@ -2328,35 +2389,36 @@ async function startServer() {
 
   app.use('/api/password-reset', resetPasswordLimiter);
 
-  app.post('/api/password-reset/request', async (req, res) => {
-    try {
-      const { email } = req.body;
-      await initiatePasswordReset(email);
-      res.json({ success: true, message: 'If an account exists with this email, a reset code has been sent' });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  });
+// Add REST endpoints for password reset
+app.post('/api/password-reset/request', async (req, res) => {
+  try {
+    const { email } = req.body;
+    await initiatePasswordReset(email);
+    res.json({ success: true, message: 'If an account exists with this email, a reset code has been sent' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
-  app.post('/api/password-reset/verify', async (req, res) => {
-    try {
-      const { email, code } = req.body;
-      await verifyResetCode(email, code);
-      res.json({ success: true, message: 'Code verified successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, message: error.message });
-    }
-  });
+app.post('/api/password-reset/verify', async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    await verifyResetCode(email, code);
+    res.json({ success: true, message: 'Code verified successfully' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
 
-  app.post('/api/password-reset/update', async (req, res) => {
-    try {
-      const { email, newPassword } = req.body;
-      await updatePassword(email, newPassword);
-      res.json({ success: true, message: 'Password updated successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, message: error.message });
-    }
-  });
+app.post('/api/password-reset/update', async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+    await updatePassword(email, newPassword);
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
 
   app.listen(port, () => {
     console.log(`🚀 Server running at http://localhost:${port}`);
