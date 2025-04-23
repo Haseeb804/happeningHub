@@ -15,6 +15,7 @@
     "crypto": "^1.0.1",
     "dotenv": "^16.5.0",
     "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
     "graphql": "^16.10.0",
     "graphql-middleware": "^6.1.35",
     "helmet": "^8.1.0",

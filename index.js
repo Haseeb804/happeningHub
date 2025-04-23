@@ -8,6 +8,16 @@ const crypto = require('crypto');
 const secretKey = crypto.randomBytes(32).toString('hex');
 const { sendInvitationEmail } = require('./emailService');
 
+const { initiatePasswordReset, verifyResetCode, updatePassword } = require('./passwordResetController');
+const rateLimit = require('express-rate-limit');
+
+// Add rate limiting middleware
+const resetPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 3, // limit each IP to 3 requests per windowMs
+  message: 'Too many password reset requests from this IP, please try again later'
+});
+
 const app = express();
 const port = 5000;
 
@@ -306,6 +316,9 @@ const typeDefs = gql`
       eventId: ID!
       speakerEmail: String!
     ): Event
+    initiatePasswordReset(email: String!): Boolean
+    verifyResetCode(email: String!, code: String!): Boolean
+    updatePassword(email: String!, newPassword: String!): Boolean
   }
 `;
 
@@ -1196,6 +1209,17 @@ userEvents: async (_, { email }) => {
     }
   },
   Mutation: {
+
+
+    initiatePasswordReset: async (_, { email }) => {
+      return await initiatePasswordReset(email);
+    },
+    verifyResetCode: async (_, { email, code }) => {
+      return await verifyResetCode(email, code);
+    },
+    updatePassword: async (_, { email, newPassword }) => {
+      return await updatePassword(email, newPassword);
+    },
 
     signup: async (
       _,
@@ -2362,6 +2386,39 @@ async function startServer() {
   } catch (err) {
     console.error('Failed to pre-load countries:', err);
   }
+
+  app.use('/api/password-reset', resetPasswordLimiter);
+
+// Add REST endpoints for password reset
+app.post('/api/password-reset/request', async (req, res) => {
+  try {
+    const { email } = req.body;
+    await initiatePasswordReset(email);
+    res.json({ success: true, message: 'If an account exists with this email, a reset code has been sent' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.post('/api/password-reset/verify', async (req, res) => {
+  try {
+    const { email, code } = req.body;
+    await verifyResetCode(email, code);
+    res.json({ success: true, message: 'Code verified successfully' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+app.post('/api/password-reset/update', async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+    await updatePassword(email, newPassword);
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
 
   app.listen(port, () => {
     console.log(`🚀 Server running at http://localhost:${port}`);
