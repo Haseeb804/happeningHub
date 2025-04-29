@@ -68,6 +68,7 @@ exports.sendInvitationEmail = async (speakerEmail, eventDetails, invitationId) =
 exports.sendReminderEmail = async (speakerEmail, eventDetails, invitationId) => {
   const acceptLink = `${process.env.BASE_URL}/api/invitations/accept/${invitationId}`;
   const rejectLink = `${process.env.BASE_URL}/api/invitations/reject/${invitationId}`;
+  
 
   const mailOptions = {
     from: process.env.EMAIL_USER,
